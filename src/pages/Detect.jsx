@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import * as faceapi from "face-api.js"
+import { API_BASE } from "../components/config.js"
 
 export default function Detect() {
   const [modelsLoaded, setModelsLoaded] = useState(false)
@@ -91,7 +92,7 @@ export default function Detect() {
   const startDetection = async () => {
     try {
       setStatus("Loading student data...")
-      const res = await fetch("/api/students")
+      const res = await fetch(`${API_BASE}/api/students`)
       if (!res.ok) {
         throw new Error(`Failed to fetch students: ${res.status} ${res.statusText}`)
       }
@@ -170,7 +171,7 @@ export default function Detect() {
                   }))
                   
                   // Record attendance
-                  fetch('/api/attendance', {
+                  fetch(`${API_BASE}/api/attendance`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

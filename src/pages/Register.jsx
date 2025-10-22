@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
+import { API_BASE } from '../components/config.js';
 
 export default function Register() {
   const [modelsLoaded, setModelsLoaded] = useState(false);
@@ -113,7 +114,7 @@ const takeSnapshotAndRegister = async () => {
 
     setStatus('Registering student...');
     
-   const registerRes = await fetch('http://localhost:4000/api/register', {
+   const registerRes = await fetch(`${API_BASE}/api/register`, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -153,7 +154,7 @@ const takeSnapshotAndRegister = async () => {
     formData.append('photo', blob, `${studentData.student_id}-photo.jpg`);
     formData.append('student_id', studentData.student_id);
 
-    const uploadRes = await fetch('http://localhost:4000/api/upload-photo', {
+    const uploadRes = await fetch(`${API_BASE}/api/upload-photo`, {
       method: 'POST',
       body: formData
     });
