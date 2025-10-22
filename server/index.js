@@ -52,9 +52,9 @@ app.get('/health', async (_req, res) => {
 });
 // Register a student with face encoding - ENHANCED DEBUGGING VERSION
 app.post('/api/register', async (req, res) => {
-  const client = await pool.connect();
-  
+  let client;
   try {
+    client = await pool.connect();
     console.log('=== REGISTER ENDPOINT HIT ===');
     console.log('Request body keys:', Object.keys(req.body));
     console.log('Request body content:', {
@@ -77,6 +77,18 @@ app.post('/api/register', async (req, res) => {
       email, 
       face_encoding 
     } = req.body;
+
+    // Normalize face_encoding: accept array or JSON string
+    let normalizedFaceEncoding = face_encoding;
+    if (typeof normalizedFaceEncoding === 'string') {
+      try {
+        const parsed = JSON.parse(normalizedFaceEncoding);
+        normalizedFaceEncoding = parsed;
+      } catch (e) {
+        console.log('❌ face_encoding string is not valid JSON');
+        return res.status(400).json({ error: 'face_encoding must be a JSON array' });
+      }
+    }
 
     // Enhanced validation with detailed logging
     console.log('Validating fields...');
@@ -103,23 +115,28 @@ app.post('/api/register', async (req, res) => {
         error: 'last_name is required' 
       });
     }
-    if (!face_encoding) {
+    if (!normalizedFaceEncoding) {
       console.log('❌ Validation failed: face_encoding missing');
       return res.status(400).json({ 
         error: 'face_encoding is required' 
       });
     }
-    if (!Array.isArray(face_encoding)) {
+    if (!Array.isArray(normalizedFaceEncoding)) {
       console.log('❌ Validation failed: face_encoding is not an array');
       return res.status(400).json({ 
         error: 'face_encoding must be an array' 
       });
     }
-    if (face_encoding.length === 0) {
+    if (normalizedFaceEncoding.length === 0) {
       console.log('❌ Validation failed: face_encoding array is empty');
       return res.status(400).json({ 
         error: 'face_encoding array cannot be empty' 
       });
+    }
+    // Ensure numeric values
+    if (!normalizedFaceEncoding.every((v) => typeof v === 'number')) {
+      console.log('❌ Validation failed: face_encoding contains non-number values');
+      return res.status(400).json({ error: 'face_encoding values must be numbers' });
     }
 
     console.log('✅ All validations passed');
@@ -133,13 +150,16 @@ app.post('/api/register', async (req, res) => {
     
     // Insert student data
     console.log('Inserting into database...');
+    // Ensure JSONB receives valid JSON string from driver
+    const faceEncodingJson = JSON.stringify(normalizedFaceEncoding);
+
     const result = await client.query(
       `INSERT INTO students (
-        student_id, first_name, last_name, middle_name, 
+        student_id, first_name, last_name, middle_name,
         course, year_level, section, email, face_encoding
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (student_id) 
-      DO UPDATE SET 
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CAST($9 AS JSONB))
+      ON CONFLICT (student_id)
+      DO UPDATE SET
         first_name = EXCLUDED.first_name,
         last_name = EXCLUDED.last_name,
         middle_name = EXCLUDED.middle_name,
@@ -147,19 +167,18 @@ app.post('/api/register', async (req, res) => {
         year_level = EXCLUDED.year_level,
         section = EXCLUDED.section,
         email = EXCLUDED.email,
-        face_encoding = EXCLUDED.face_encoding,
-        updated_at = CURRENT_TIMESTAMP
+        face_encoding = EXCLUDED.face_encoding
       RETURNING id, student_id`,
       [
-        student_id, 
-        first_name, 
-        last_name, 
-        middle_name || null, 
-        course || null, 
+        student_id,
+        first_name,
+        last_name,
+        middle_name || null,
+        course || null,
         year_level || null,
         section || null,
         email || null,
-        face_encoding
+        faceEncodingJson
       ]
     );
 
@@ -178,7 +197,9 @@ app.post('/api/register', async (req, res) => {
     });
 
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
     console.error('❌ Registration error:', err);
     console.error('Error details:', {
       message: err.message,
@@ -193,7 +214,7 @@ app.post('/api/register', async (req, res) => {
       res.status(500).json({ error: 'Internal server error: ' + err.message });
     }
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 // Handle student photo uploads - FIXED VERSION
@@ -225,9 +246,9 @@ const upload = multer({
 
 // Upload student photo - FIXED VERSION
 app.post('/api/upload-photo', upload.single('photo'), async (req, res) => {
-  const client = await pool.connect();
-  
+  let client;
   try {
+    client = await pool.connect();
     const { student_id } = req.body;
     if (!student_id) {
       return res.status(400).json({ error: 'student_id is required' });
@@ -257,7 +278,7 @@ app.post('/api/upload-photo', upload.single('photo'), async (req, res) => {
     console.error('Photo upload error:', err);
     res.status(500).json({ error: 'Internal server error' });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
