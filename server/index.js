@@ -282,6 +282,124 @@ app.post('/api/upload-photo', upload.single('photo'), async (req, res) => {
   }
 });
 
+// Get students with face encodings for detection
+app.get('/api/students', async (_req, res) => {
+  let client;
+  try {
+    client = await pool.connect();
+    const result = await client.query(
+      `SELECT 
+         student_id, first_name, last_name, middle_name,
+         course, year_level, section, email, photo, face_encoding
+       FROM students
+       WHERE status = 'active'`
+    );
+
+    const students = result.rows.map((row) => {
+      let encoding = row.face_encoding;
+      if (typeof encoding === 'string') {
+        try { encoding = JSON.parse(encoding); } catch { encoding = []; }
+      }
+      if (!Array.isArray(encoding)) {
+        encoding = [];
+      }
+      return {
+        student_id: row.student_id,
+        first_name: row.first_name,
+        last_name: row.last_name,
+        middle_name: row.middle_name,
+        course: row.course,
+        year_level: row.year_level,
+        section: row.section,
+        email: row.email,
+        photo: row.photo,
+        face_encoding: encoding
+      };
+    }).filter((s) => Array.isArray(s.face_encoding) && s.face_encoding.length === 128);
+
+    res.json({ success: true, students });
+  } catch (err) {
+    console.error('Error fetching students:', err);
+    res.status(500).json({ error: 'internal_error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Record attendance (time in/out)
+app.post('/api/attendance', async (req, res) => {
+  const { student_id, type } = req.body;
+  if (!student_id || !type || !['in', 'out'].includes(type)) {
+    return res.status(400).json({ error: 'student_id and type (in|out) required' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Resolve internal student primary key
+    const s = await client.query('SELECT id FROM students WHERE student_id = $1', [student_id]);
+    if (s.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'student_not_found' });
+    }
+    const internalId = s.rows[0].id;
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0]; // HH:MM:SS
+
+    const existing = await client.query(
+      'SELECT id, time_in, time_out FROM attendance WHERE student_id = $1 AND date = $2',
+      [internalId, dateStr]
+    );
+
+    if (existing.rows.length === 0) {
+      // Create new attendance row
+      const cols = ['student_id', 'date'];
+      const vals = [internalId, dateStr];
+      if (type === 'in') {
+        cols.push('time_in');
+        vals.push(timeStr);
+      } else {
+        cols.push('time_out');
+        vals.push(timeStr);
+      }
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      await client.query(
+        `INSERT INTO attendance (${cols.join(', ')}) VALUES (${placeholders})`,
+        vals
+      );
+    } else {
+      // Update existing row
+      const row = existing.rows[0];
+      if (type === 'in' && !row.time_in) {
+        await client.query(
+          'UPDATE attendance SET time_in = $1 WHERE id = $2',
+          [timeStr, row.id]
+        );
+      } else if (type === 'out' && !row.time_out) {
+        await client.query(
+          'UPDATE attendance SET time_out = $1 WHERE id = $2',
+          [timeStr, row.id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    if (client) {
+      await client.query('ROLLBACK').catch(() => {});
+    }
+    console.error('Error recording attendance:', err);
+    res.status(500).json({ error: 'internal_error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 // Get attendance report
 app.get('/api/attendance-report', async (req, res) => {
   try {

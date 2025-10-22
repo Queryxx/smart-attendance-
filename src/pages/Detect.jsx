@@ -18,7 +18,7 @@ export default function Detect() {
   useEffect(() => {
     const loadModels = async () => {
       try {
-        const MODEL_URL = import.meta.env.BASE_URL + "/models"
+        const MODEL_URL = `${import.meta.env.BASE_URL}models`
         console.log('Loading models from:', MODEL_URL)
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
@@ -102,8 +102,8 @@ export default function Detect() {
       // Build labeled descriptors
       const labeled = students.map(student => {
         const descriptor = new Float32Array(student.face_encoding)
-        // Use student_id as the label for matching
-        return new faceapi.LabeledFaceDescriptors(student.student_id, [descriptor])
+        // Ensure label is string to match FaceMatcher expectations
+        return new faceapi.LabeledFaceDescriptors(String(student.student_id), [descriptor])
       })
       const matcher = new faceapi.FaceMatcher(labeled, 0.6)
 
@@ -155,7 +155,7 @@ export default function Detect() {
             const newBoxes = detections.map(d => {
               const b = d.detection.box
               const best = matcher.findBestMatch(d.descriptor)
-              const student = students.find(s => s.student_id === best.label)
+              const student = students.find(s => String(s.student_id) === best.label)
               
               // Only process if we found a matching student and confidence is high
               if (student && best.distance < 0.6) {
@@ -244,7 +244,8 @@ export default function Detect() {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
     }
-    setMatchName("")
+    setCurrentStudent(null)
+    setBoxes([])
     setStatus("Camera stopped - click Open Camera to start again")
   }
 
@@ -337,7 +338,7 @@ export default function Detect() {
                   style={{ maxHeight: '70vh', zIndex: 9999 }}
                 >
                   {boxes.map((b, i) => {
-                    const labelText = b.label && b.label !== 'unknown' ? `Hello, ${b.label}` : ''
+                    const labelText = b.student ? `Hello, ${b.student.first_name}` : ''
                     // We'll position the label above the box by default. If there's not enough space
                     // above, place it below. Also clamp horizontal position so it doesn't overflow overlay.
                     const overlayWidth = overlayRef.current ? overlayRef.current.clientWidth : 0
@@ -378,7 +379,7 @@ export default function Detect() {
                             width: '100%',
                             height: '100%',
                             boxSizing: 'border-box',
-                            borderColor: b.label && b.label !== 'unknown' ? '#22c55e' : '#ef4444',
+                            borderColor: b.student ? '#22c55e' : '#ef4444',
                             zIndex: 9999,
                             pointerEvents: 'none'
                           }}
