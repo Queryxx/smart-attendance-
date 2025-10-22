@@ -1,0 +1,1 @@
+export const labels = ['Jane', 'John','Rix'];
