@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import * as faceapi from "face-api.js"
-import { API_BASE } from "../components/config.js"
+import { API_URL } from "../components/config"
 
 export default function Detect() {
   const [modelsLoaded, setModelsLoaded] = useState(false)
@@ -92,7 +92,7 @@ export default function Detect() {
   const startDetection = async () => {
     try {
       setStatus("Loading student data...")
-      const res = await fetch(`${API_BASE}/api/students`)
+      const res = await fetch(`${API_URL}/api/students`)
       if (!res.ok) {
         throw new Error(`Failed to fetch students: ${res.status} ${res.statusText}`)
       }
@@ -106,7 +106,9 @@ export default function Detect() {
         // Ensure label is string to match FaceMatcher expectations
         return new faceapi.LabeledFaceDescriptors(String(student.student_id), [descriptor])
       })
-      const matcher = new faceapi.FaceMatcher(labeled, 0.6)
+      
+      // Create matcher only if we have registered students
+      const matcher = labeled.length > 0 ? new faceapi.FaceMatcher(labeled, 0.6) : null
 
       setStatus("Detecting...")
 
@@ -155,15 +157,40 @@ export default function Detect() {
             // Map detections to overlay boxes and handle attendance
             const newBoxes = detections.map(d => {
               const b = d.detection.box
+              
+              // If no registered students or matcher not created, mark all faces as unregistered
+              if (!matcher) {
+                return {
+                  x: b.x * scaleX,
+                  y: b.y * scaleY,
+                  width: b.width * scaleX,
+                  height: b.height * scaleY,
+                  student: null,
+                  distance: 1,
+                  unregistered: true
+                }
+              }
+
               const best = matcher.findBestMatch(d.descriptor)
               const student = students.find(s => String(s.student_id) === best.label)
               
-              // Only process if we found a matching student and confidence is high
-              if (student && best.distance < 0.6) {
+              // If distance is too high, treat as unregistered
+              if (best.distance >= 0.6) {
+                return {
+                  x: b.x * scaleX,
+                  y: b.y * scaleY,
+                  width: b.width * scaleX,
+                  height: b.height * scaleY,
+                  student: null,
+                  distance: best.distance,
+                  unregistered: true
+                }
+              }
+              
+              // Process if we found a matching student
+              if (student) {
                 const now = Date.now()
-                const lastCheck = lastAttendanceCheck[student.student_id] || 0
-                
-                // Only process attendance every 5 seconds per student
+                const lastCheck = lastAttendanceCheck[student.student_id] || 0                // Only process attendance every 5 seconds per student
                 if (now - lastCheck >= 5000) {
                   setLastAttendanceCheck(prev => ({
                     ...prev,
@@ -171,7 +198,7 @@ export default function Detect() {
                   }))
                   
                   // Record attendance
-                  fetch(`${API_BASE}/api/attendance`, {
+                  fetch(`${API_URL}/api/attendance`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -208,7 +235,7 @@ export default function Detect() {
             })
 
             setBoxes(newBoxes)
-            // Update currentStudent if any known face
+            // Update currentStudent if any known face  
             const known = newBoxes.find(b => b.student)
             setCurrentStudent(known ? known.student : null)
           }
@@ -339,7 +366,7 @@ export default function Detect() {
                   style={{ maxHeight: '70vh', zIndex: 9999 }}
                 >
                   {boxes.map((b, i) => {
-                    const labelText = b.student ? `Hello, ${b.student.first_name}` : ''
+                    const labelText = b.student ? `Hello, ${b.student.first_name}` : (b.unregistered ? 'Not Registered' : '')
                     // We'll position the label above the box by default. If there's not enough space
                     // above, place it below. Also clamp horizontal position so it doesn't overflow overlay.
                     const overlayWidth = overlayRef.current ? overlayRef.current.clientWidth : 0
@@ -380,7 +407,7 @@ export default function Detect() {
                             width: '100%',
                             height: '100%',
                             boxSizing: 'border-box',
-                            borderColor: b.student ? '#22c55e' : '#ef4444',
+                            borderColor: b.student ? '#22c55e' : (b.unregistered ? '#f59e0b' : '#ef4444'),
                             zIndex: 9999,
                             pointerEvents: 'none'
                           }}
@@ -393,7 +420,7 @@ export default function Detect() {
                               position: 'absolute',
                               left: `${labelLeft - b.x}px`, // position relative to box container
                               top: `${labelTop - b.y}px`,
-                              background: 'rgba(34,197,94,0.92)',
+                              background: b.unregistered ? 'rgba(245,158,11,0.92)' : 'rgba(34,197,94,0.92)',
                               color: '#fff',
                               padding: '4px 8px',
                               fontWeight: 700,
